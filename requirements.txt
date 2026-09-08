@@ -13,11 +13,10 @@ tensorboard>=2.2
 torch>=1.7.0
 torchvision>=0.8.1
 tqdm>=4.41.0
-mediapipe
+requests
 
 seaborn>=0.11.0
 pandas
 
 thop
 pycocotools>=2.0
-requests
