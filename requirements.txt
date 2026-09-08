@@ -20,3 +20,4 @@ pandas
 
 thop
 pycocotools>=2.0
+requests
