@@ -7,16 +7,15 @@ import numpy as np
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 
-# 导入核心检测模块（不依赖 tkinter，也不导入 dlib）
 from detection_core import _process_image_array, load_model
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-print("⏳ Loading YOLO model...")
-load_model()
-print("✅ YOLO model loaded.")
+model_loaded = False
+
+print("⏳ Web server starting (model will load on first request)...")
 
 @app.route('/')
 def index():
@@ -29,7 +28,14 @@ def handle_connect():
 
 @socketio.on('image')
 def handle_image(data):
+    global model_loaded
     try:
+        if not model_loaded:
+            print("⏳ Loading YOLO model on first request...")
+            load_model()
+            model_loaded = True
+            print("✅ YOLO model loaded.")
+
         raw = data['image']
         if ',' in raw:
             raw = raw.split(',')[1]
