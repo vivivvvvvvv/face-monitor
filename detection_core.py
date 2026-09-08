@@ -1,5 +1,6 @@
 # detection_core.py
-# 核心检测逻辑，使用 MediaPipe 替代 dlib
+# 轻量版：只用 YOLOv5-face 五点检测 + 简化疲劳分数（眼距/脸宽）
+# 无 dlib / MediaPipe 依赖
 
 import torch
 import cv2
@@ -7,7 +8,6 @@ import numpy as np
 import copy
 import sys
 import os
-import mediapipe as mp
 
 from utils.datasets import letterbox
 from utils.general import check_img_size, non_max_suppression_face, scale_coords, xyxy2xywh
@@ -16,53 +16,12 @@ from models.experimental import attempt_load
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
 
-# ---------- MediaPipe 初始化 ----------
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5
-)
-
-# 左右眼关键点索引（MediaPipe 468 点模型）
-LEFT_EYE_INDICES = [33, 133, 157, 159, 161, 173]
-RIGHT_EYE_INDICES = [362, 263, 386, 384, 381, 380]
-
-def eye_aspect_ratio(landmarks, indices):
-    """计算 EAR"""
-    points = np.array([(landmarks[i].x, landmarks[i].y) for i in indices])
-    A = np.linalg.norm(points[1] - points[5])
-    B = np.linalg.norm(points[2] - points[4])
-    C = np.linalg.norm(points[0] - points[3])
-    if C == 0:
-        return 0.0
-    return (A + B) / (2.0 * C)
-
-def compute_ear_from_roi(face_roi):
-    """在一个人脸 ROI 内用 MediaPipe 计算 EAR"""
-    if face_roi is None or face_roi.size == 0:
-        return None
-    h, w = face_roi.shape[:2]
-    if h < 30 or w < 30:
-        return None
-    rgb_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb_roi)
-    if not results.multi_face_landmarks:
-        return None
-    landmarks = results.multi_face_landmarks[0].landmark
-    left_ear = eye_aspect_ratio(landmarks, LEFT_EYE_INDICES)
-    right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE_INDICES)
-    return (left_ear + right_ear) / 2.0
-
-# ---------- 模型加载 ----------
 def load_model(weights='yolov5s-face.pt'):
     global model
     if model is None:
         model = attempt_load(weights, map_location=device)
     return model
 
-# ---------- 核心处理函数 ----------
 def _process_image_array(orgimg):
     global model
     img_size = 640
@@ -112,55 +71,29 @@ def _process_image_array(orgimg):
                 conf = det[j, 4].cpu().numpy()
                 area = xywh[2] * xywh[3]
 
+                # ---- 简化疲劳分数（眼距 / 脸宽） ----
                 left_eye_x, left_eye_y = landmarks[0], landmarks[1]
                 right_eye_x, right_eye_y = landmarks[2], landmarks[3]
                 eye_dist = np.hypot(left_eye_x - right_eye_x, left_eye_y - right_eye_y)
                 face_w = xywh[2] * orgimg.shape[1]
                 fatigue_simple = eye_dist / face_w if face_w > 0 else 0.0
 
-                # ---- 用 MediaPipe 计算 EAR ----
-                ear = None
-                h, w = orgimg.shape[:2]
-                x1 = int(xywh[0]*w - 0.5*xywh[2]*w)
-                y1 = int(xywh[1]*h - 0.5*xywh[3]*h)
-                x2 = int(xywh[0]*w + 0.5*xywh[2]*w)
-                y2 = int(xywh[1]*h + 0.5*xywh[3]*h)
-
-                margin = 15
-                x1 = max(0, x1 - margin)
-                y1 = max(0, y1 - margin)
-                x2 = min(w, x2 + margin)
-                y2 = min(h, y2 + margin)
-
-                face_roi = orgimg[y1:y2, x1:x2]
-                if face_roi.size > 0:
-                    ear = compute_ear_from_roi(face_roi)
-
                 # ---- 状态判断 ----
-                if ear is not None:
-                    if ear < 0.18:
-                        fatigue_display = "😴 Drowsy"
-                        eye_display = "🚫 Closed"
-                    elif ear < 0.25:
-                        fatigue_display = "😑 Tired"
-                        eye_display = "👀 Half-closed"
-                    else:
-                        fatigue_display = "😊 Normal"
-                        eye_display = "👁️ Open"
+                if fatigue_simple < 0.18:
+                    fatigue_display = "😴 Drowsy"
+                    eye_display = "🚫 Closed (approx)"
+                elif fatigue_simple < 0.22:
+                    fatigue_display = "😑 Tired"
+                    eye_display = "👀 Half-closed (approx)"
                 else:
-                    if fatigue_simple < 0.18:
-                        fatigue_display = "😴 Drowsy"
-                        eye_display = "🚫 Closed"
-                    elif fatigue_simple < 0.22:
-                        fatigue_display = "😑 Tired"
-                        eye_display = "👀 Half-closed"
-                    else:
-                        fatigue_display = "😊 Normal"
-                        eye_display = "👁️ Open"
+                    fatigue_display = "😊 Normal"
+                    eye_display = "👁️ Open"
 
-                results.append((face_counter, fatigue_display, eye_display, ear, area))
+                # 注意：这里 ear 设为 None，前端会显示为 N/A
+                results.append((face_counter, fatigue_display, eye_display, None, area))
 
                 # ---- 绘图 ----
+                h, w = orgimg.shape[:2]
                 x1 = int(xywh[0]*w - 0.5*xywh[2]*w)
                 y1 = int(xywh[1]*h - 0.5*xywh[3]*h)
                 x2 = int(xywh[0]*w + 0.5*xywh[2]*w)
