@@ -1,6 +1,6 @@
 # detection_core.py
 # 轻量版：只用 YOLOv5-face 五点检测 + 简化疲劳分数（眼距/脸宽）
-# 无 dlib / MediaPipe 依赖
+# 无 dlib / MediaPipe 依赖，适合 Render 512MB 环境
 
 import torch
 import cv2
@@ -16,7 +16,7 @@ from models.experimental import attempt_load
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
 
-def load_model(weights='yolov5s-face.pt'):
+def load_model(weights='yolov5n-0.5.pt'):   # 使用小模型
     global model
     if model is None:
         model = attempt_load(weights, map_location=device)
@@ -89,7 +89,7 @@ def _process_image_array(orgimg):
                     fatigue_display = "😊 Normal"
                     eye_display = "👁️ Open"
 
-                # 注意：这里 ear 设为 None，前端会显示为 N/A
+                # ear 设为 None，前端显示 N/A
                 results.append((face_counter, fatigue_display, eye_display, None, area))
 
                 # ---- 绘图 ----
