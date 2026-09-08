@@ -31,3 +31,4 @@ pycocotools>=2.0  # COCO mAP
 flask
 flask-socketio
 eventlet
+dlib
